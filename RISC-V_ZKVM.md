@@ -9,15 +9,30 @@ ZEVM now supports bare-metal RISC-V targets with complete Zisk zkVM integration,
 ### Build and Run
 
 ```bash
-# Build for Zisk zkVM
+# Build for Zisk zkVM using dedicated build file
+zig build --build-file build.zisk.zig
+
+# Or with optimization options
+zig build --build-file build.zisk.zig -Doptimize=ReleaseSmall
+
+# Run in Zisk emulator
+../hello_zisk/zisk/target/release/ziskemu -e zig-out/bin/block_transition_zisk
+```
+
+**Note**: The `build.zisk.zig` file is a dedicated build configuration specifically for Zisk zkVM. It automatically:
+- Targets `riscv64-freestanding`
+- Disables crypto libraries (blst, mcl) that aren't available in freestanding environments
+- Uses the custom linker script (`zisk.ld`)
+- Sets the medium code model for full 64-bit addressing
+
+For reference, the old manual approach (not recommended):
+```bash
+# Old approach - now replaced by build.zisk.zig
 zig build -Dtarget=riscv64-freestanding \
           -Dcpu=baseline_rv64-a-c-d-f-zicsr-zaamo-zalrsc \
           -Doptimize=ReleaseSmall \
           -Dblst=false \
           -Dmcl=false
-
-# Run in Zisk emulator
-../hello_zisk/zisk/target/release/ziskemu -e zig-out/bin/block_transition_zisk
 ```
 
 ### Expected Output

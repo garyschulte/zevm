@@ -178,10 +178,8 @@ pub fn build(b: *std.Build) void {
     });
     lib.root_module.addImport("build_options", lib_options_module);
 
-    // Add crypto dependencies only for non-freestanding targets
-    if (target.result.os.tag != .freestanding) {
-        addCryptoLibraries(b, lib, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
-    }
+    // Add crypto dependencies
+    addCryptoLibraries(b, lib, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
 
     // Install the library
     b.installArtifact(lib);
@@ -241,12 +239,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const baremetal_module = b.addModule("baremetal", .{
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/baremetal/main.zig" } },
-        .target = target,
-        .optimize = optimize,
-    });
-
     // Add module dependencies
     bytecode_module.addImport("primitives", primitives_module);
     state_module.addImport("primitives", primitives_module);
@@ -271,7 +263,6 @@ pub fn build(b: *std.Build) void {
     handler_module.addImport("precompile", precompile_module);
     inspector_module.addImport("primitives", primitives_module);
     inspector_module.addImport("interpreter", interpreter_module);
-    baremetal_module.addImport("primitives", primitives_module);
 
     // Add modules to main library
     lib.root_module.addImport("primitives", primitives_module);
@@ -283,12 +274,9 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addImport("precompile", precompile_module);
     lib.root_module.addImport("handler", handler_module);
     lib.root_module.addImport("inspector", inspector_module);
-    lib.root_module.addImport("baremetal", baremetal_module);
 
-    // Only build native examples when not targeting freestanding
-    if (target.result.os.tag != .freestanding) {
-        // Test executable
-        const test_exe = b.addExecutable(.{
+    // Test executable
+    const test_exe = b.addExecutable(.{
         .name = "zevm-test",
         .root_module = b.addModule("zevm-test", .{
             .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/test.zig" } },
@@ -542,69 +530,4 @@ pub fn build(b: *std.Build) void {
     cheatcode_inspector_exe.root_module.addImport("handler", handler_module);
     cheatcode_inspector_exe.root_module.addImport("inspector", inspector_module);
     b.installArtifact(cheatcode_inspector_exe);
-
-    // Block transition example
-    const block_transition_exe = b.addExecutable(.{
-        .name = "block_transition",
-        .root_module = b.addModule("block_transition", .{
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/block_transition.zig" } },
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    addCryptoLibraries(b, block_transition_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
-    block_transition_exe.root_module.addImport("build_options", lib_options_module);
-    block_transition_exe.root_module.addImport("zevm", lib.root_module);
-    block_transition_exe.root_module.addImport("primitives", primitives_module);
-    block_transition_exe.root_module.addImport("bytecode", bytecode_module);
-    block_transition_exe.root_module.addImport("state", state_module);
-    block_transition_exe.root_module.addImport("database", database_module);
-    block_transition_exe.root_module.addImport("context", context_module);
-    block_transition_exe.root_module.addImport("interpreter", interpreter_module);
-    block_transition_exe.root_module.addImport("precompile", precompile_module);
-    block_transition_exe.root_module.addImport("handler", handler_module);
-    block_transition_exe.root_module.addImport("inspector", inspector_module);
-    b.installArtifact(block_transition_exe);
-    } // End of native examples conditional
-
-    // Zisk zkVM block transition example (RV64IM target)
-    // Build with: zig build -Dtarget=riscv64-freestanding -Dblst=false -Dmcl=false
-    const block_transition_zisk_exe = b.addExecutable(.{
-        .name = "block_transition_zisk",
-        .root_module = b.addModule("block_transition_zisk", .{
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/block_transition_zisk.zig" } },
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-
-    // Use custom linker script for zisk zkVM to place writable sections in RAM
-    if (target.result.os.tag == .freestanding) {
-        block_transition_zisk_exe.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "zisk.ld" } });
-        // Use medany code model for full 64-bit address space access
-        block_transition_zisk_exe.root_module.code_model = .medium;
-    }
-
-    // Don't link any system libraries for bare-metal/freestanding targets
-    // The freestanding target doesn't have libc or external crypto libraries
-    if (target.result.os.tag != .freestanding) {
-        addCryptoLibraries(b, block_transition_zisk_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
-    }
-    block_transition_zisk_exe.root_module.addImport("build_options", lib_options_module);
-    // Don't import zevm lib for freestanding - it may have crypto library dependencies
-    // Instead, import individual modules directly
-    if (target.result.os.tag != .freestanding) {
-        block_transition_zisk_exe.root_module.addImport("zevm", lib.root_module);
-    }
-    block_transition_zisk_exe.root_module.addImport("baremetal", baremetal_module);
-    block_transition_zisk_exe.root_module.addImport("primitives", primitives_module);
-    block_transition_zisk_exe.root_module.addImport("bytecode", bytecode_module);
-    block_transition_zisk_exe.root_module.addImport("state", state_module);
-    block_transition_zisk_exe.root_module.addImport("database", database_module);
-    block_transition_zisk_exe.root_module.addImport("context", context_module);
-    block_transition_zisk_exe.root_module.addImport("interpreter", interpreter_module);
-    block_transition_zisk_exe.root_module.addImport("precompile", precompile_module);
-    block_transition_zisk_exe.root_module.addImport("handler", handler_module);
-    block_transition_zisk_exe.root_module.addImport("inspector", inspector_module);
-    b.installArtifact(block_transition_zisk_exe);
 }
