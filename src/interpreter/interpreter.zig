@@ -8,7 +8,6 @@ const Memory = @import("memory.zig").Memory;
 const InstructionResult = @import("instruction_result.zig").InstructionResult;
 const InterpreterAction = @import("interpreter_action.zig").InterpreterAction;
 const CallScheme = @import("interpreter_action.zig").CallScheme;
-const InstructionContext = @import("instruction_context.zig").InstructionContext;
 
 /// Input data for current execution context
 pub const InputsImpl = struct {
@@ -55,10 +54,10 @@ pub const InputsImpl = struct {
     /// Create default inputs
     pub fn default() InputsImpl {
         return InputsImpl{
-            .caller = primitives.Address.zero(),
-            .target = primitives.Address.zero(),
-            .value = primitives.U256.zero(),
-            .data = primitives.Bytes.init(std.heap.page_allocator, 0) catch unreachable,
+            .caller = [_]u8{0} ** 20,
+            .target = [_]u8{0} ** 20,
+            .value = 0,
+            .data = @as(primitives.Bytes, @constCast(&[_]u8{})),
             .gas_limit = 0,
             .scheme = .call,
             .is_static = false,
@@ -213,6 +212,10 @@ pub const RuntimeFlags = struct {
 pub const ExtBytecode = struct {
     /// Bytecode
     bytecode: bytecode.Bytecode,
+    /// Program counter
+    pc: usize,
+    /// Whether execution is still running (false after halt/stop/return)
+    continue_execution: bool,
     /// Is EOF
     is_eof: bool,
     /// EOF version
@@ -224,6 +227,8 @@ pub const ExtBytecode = struct {
     pub fn new(bytecode_data: bytecode.Bytecode) ExtBytecode {
         return ExtBytecode{
             .bytecode = bytecode_data,
+            .pc = 0,
+            .continue_execution = true,
             .is_eof = false,
             .eof_version = null,
             .eof_sections = null,
@@ -233,7 +238,9 @@ pub const ExtBytecode = struct {
     /// Create default extended bytecode
     pub fn default() ExtBytecode {
         return ExtBytecode{
-            .bytecode = bytecode.Bytecode.default(),
+            .bytecode = bytecode.Bytecode.new(),
+            .pc = 0,
+            .continue_execution = true,
             .is_eof = false,
             .eof_version = null,
             .eof_sections = null,
@@ -245,6 +252,44 @@ pub const ExtBytecode = struct {
         if (self.eof_sections) |*sections| {
             sections.deinit();
         }
+    }
+
+    /// Read current opcode byte (returns 0x00/STOP if past end)
+    pub fn opcode(self: *const ExtBytecode) u8 {
+        const bytes = self.bytecode.bytecode();
+        if (self.pc >= bytes.len) return 0x00;
+        return bytes[self.pc];
+    }
+
+    /// Advance PC by delta bytes
+    pub fn relativeJump(self: *ExtBytecode, delta: usize) void {
+        self.pc += delta;
+    }
+
+    /// Set PC to absolute destination
+    pub fn absoluteJump(self: *ExtBytecode, dest: usize) void {
+        self.pc = dest;
+    }
+
+    /// Check if jump destination is a valid JUMPDEST
+    pub fn isValidJump(self: *const ExtBytecode, dest: usize) bool {
+        return self.bytecode.isValidJump(dest);
+    }
+
+    /// Read n immediate bytes at current PC (zero-padded if near end of code)
+    pub fn readImmediates(self: *const ExtBytecode, comptime n: u8) [n]u8 {
+        const bytes = self.bytecode.bytecode();
+        var result: [n]u8 = .{0} ** n;
+        if (self.pc >= bytes.len) return result;
+        const available = bytes.len - self.pc;
+        const to_read = @min(@as(usize, n), available);
+        @memcpy(result[0..to_read], bytes[self.pc .. self.pc + to_read]);
+        return result;
+    }
+
+    /// Returns true if execution is still running
+    pub fn isNotEnd(self: *const ExtBytecode) bool {
+        return self.continue_execution;
     }
 
     /// Get bytecode
@@ -340,6 +385,8 @@ pub const Interpreter = struct {
     input: InputsImpl,
     /// Runtime flags controlling execution behavior
     runtime_flags: RuntimeFlags,
+    /// Execution result (set by halt())
+    result: InstructionResult,
     /// Extended functionality and customizations
     extend: void,
 
@@ -360,6 +407,7 @@ pub const Interpreter = struct {
             .memory = memory,
             .input = input,
             .runtime_flags = RuntimeFlags.new(is_static, spec_id),
+            .result = .stop,
             .extend = {},
         };
     }
@@ -371,7 +419,7 @@ pub const Interpreter = struct {
             ExtBytecode.default(),
             InputsImpl.default(),
             false,
-            primitives.SpecId.default(),
+            .prague,
             std.math.maxInt(u64),
         );
     }
@@ -383,9 +431,15 @@ pub const Interpreter = struct {
             ExtBytecode.default(),
             InputsImpl.default(),
             false,
-            primitives.SpecId.default(),
+            .prague,
             0,
         );
+    }
+
+    /// Halt execution with the given result
+    pub fn halt(self: *Interpreter, r: InstructionResult) void {
+        self.bytecode.continue_execution = false;
+        self.result = r;
     }
 
     /// Deinitialize the interpreter
@@ -411,6 +465,7 @@ pub const Interpreter = struct {
         self.memory = memory;
         self.input = input;
         self.runtime_flags = RuntimeFlags.new(is_static, spec_id);
+        self.result = .stop;
         self.extend = {};
     }
 
