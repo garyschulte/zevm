@@ -181,7 +181,7 @@ pub const WarmAddresses = struct {
         self.precompiles.deinit(std.heap.c_allocator);
         var iterator = self.access_list.iterator();
         while (iterator.next()) |entry| {
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(std.heap.page_allocator);
         }
         self.access_list.deinit();
     }
@@ -199,7 +199,7 @@ pub const WarmAddresses = struct {
         // Clear existing access list
         var iterator = self.access_list.iterator();
         while (iterator.next()) |entry| {
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(std.heap.page_allocator);
         }
         self.access_list.clearRetainingCapacity();
 
@@ -216,7 +216,7 @@ pub const WarmAddresses = struct {
         self.coinbase = null;
         var iterator = self.access_list.iterator();
         while (iterator.next()) |entry| {
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(std.heap.page_allocator);
         }
         self.access_list.clearRetainingCapacity();
     }
@@ -412,7 +412,7 @@ pub const JournalInner = struct {
     ///
     /// `commit_tx` is used even for discarding transactions so transaction_id will be incremented.
     pub fn commitTx(self: *JournalInner) void {
-        self.transient_storage.clear();
+        self.transient_storage.clearRetainingCapacity();
         self.depth = 0;
         self.journal.clearRetainingCapacity();
         self.warm_addresses.clearCoinbaseAndAccessList();
@@ -432,7 +432,7 @@ pub const JournalInner = struct {
             entry.revert(&self.evm_state, &self.transient_storage, is_spurious_dragon_enabled);
         }
 
-        self.transient_storage.clear();
+        self.transient_storage.clearRetainingCapacity();
         self.depth = 0;
         self.logs.clearRetainingCapacity();
         self.transaction_id += 1;
@@ -449,7 +449,7 @@ pub const JournalInner = struct {
         const evm_state = self.evm_state;
         self.evm_state = state.EvmState.init(std.heap.page_allocator);
         self.logs.clearRetainingCapacity();
-        self.transient_storage.clear();
+        self.transient_storage.clearRetainingCapacity();
         self.journal.clearRetainingCapacity();
         self.depth = 0;
         self.transaction_id = 0;
@@ -543,7 +543,7 @@ pub const JournalInner = struct {
     /// Mark account as touched.
     pub fn balanceIncr(self: *JournalInner, db: anytype, address: primitives.Address, balance: primitives.U256) !void {
         const account = try self.loadAccountMut(db, address);
-        account.account.incrBalance(balance);
+        account.data.account.incrBalance(balance);
     }
 
     /// Increments the nonce of the account.
